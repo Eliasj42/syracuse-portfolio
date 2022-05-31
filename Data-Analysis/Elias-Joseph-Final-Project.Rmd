@@ -1,0 +1,318 @@
+---
+title: "Project Report: Analysis of Stroke Data"
+author: "Elias Joseph"
+date: "June 21, 2021"
+output: 
+  pdf_document: 
+    extra_dependencies: ["float"]
+---
+
+
+
+# Problem Statement
+
+I will be analyzing data on strokes to see if I can use the features provided to predict which patients are at risk of getting a stroke.  These features are gender, age, hypertension, heart disease, married, work type, residence type, glucose level, bmi, and smoking status.
+
+Some of the code has been included, however all the code will be accessable in the form of an attatched R markdown file and jupyter notebook file.
+
+```{r, echo = F, message=F, warning = F}
+library(ggplot2)
+library(e1071)
+library(caret)
+library(naniar)
+library(smotefamily)
+```
+
+
+```{r, echo = F, warning = F, message = F}
+stroke.df = read.csv('stroke-data/archive/healthcare-dataset-stroke-data.csv')
+
+na_strings <- c("NA", "N A", "N / A", "N/A", "N/ A", "Not Available", "NOt available")
+stroke.df$bmi = as.character(stroke.df$bmi)
+stroke.df = stroke.df %>%
+  replace_with_na_all(condition = ~.x %in% na_strings)
+
+stroke.df$bmi = as.double(stroke.df$bmi)
+
+stroke.df$stroke = as.factor(stroke.df$stroke)
+stroke.df$id = NULL
+stroke.df$gender = as.factor(stroke.df$gender)
+stroke.df$hypertension = as.factor(stroke.df$hypertension)
+stroke.df$heart_disease = as.factor(stroke.df$heart_disease)
+stroke.df$ever_married = as.factor(stroke.df$ever_married)
+stroke.df$work_type = as.factor(stroke.df$work_type)
+stroke.df$Residence_type = as.factor(stroke.df$Residence_type)
+stroke.df$smoking_status = as.factor(stroke.df$smoking_status)
+
+stroke.df = na.omit(stroke.df)
+
+```
+
+
+```{r, echo = F}
+
+cm <- function(m){
+  p = predict(m, stroke.df)
+  q = confusionMatrix(
+  table(
+    pred = as.factor(p),
+    truth = stroke.df$stroke
+  )
+  )
+  return(q)
+}
+```
+
+## Data Summary
+
+* ID: a unique identifier.  This doesn't provide any useful information when it comes to looking at trends, so it won't be included in further analysis.
+
+* Gender: he gender of the patient: Male, Female, or other.
+
+* Age: The patient's age.
+
+* Hypertension: A boolean value indicating if the patient has hypertension.
+
+* Heart Disease: A boolean value indicating if the patient has heart disease.
+
+* Ever Married: A boolean value indicating if the patient was ever married.
+
+* Work Type: The patients employment type.  Factors are 'children', 'Govt Job', 'Never Worked', 'Private', and 'Self Employed'.
+
+* Residence Type: A 2 level factor indicating if the patient lives in an urban or rural environment.
+
+* Average Glucose Level: The average glucose level in the patients blood.
+
+* BMI: The patient's body mass index.
+
+* Smoking Status: Details if the patient ever smoked.  factors include 'formerly smoked', 'never smoked', 'smokes', and 'unknown'.
+
+* Stroke: A boolean value indicating whether the patient suffered a stroke.
+
+# EDA
+
+```{r, message = F}
+ggplot(stroke.df, aes(x = stroke)) +
+  geom_bar() + 
+  labs(title = 'Distribution of Stroke variable', x = 'Stroke', y = '')
+```
+
+The most difficult thing about this data set is the fact that about 95% of the cases are negative.  Therefore, if accuracy is used as a metric to find a model, the models will most likely classify everything as negative, as that would have a 95% accuracy.
+
+```{r, message = F}
+ggplot(stroke.df, aes(x = heart_disease)) + 
+  geom_bar() + 
+  labs(title = 'Distribution of Heart Disease', x = 'Heart Disease')
+
+ggplot(stroke.df, aes(x = hypertension)) + 
+  geom_bar() + 
+  labs(title = 'Distribution of Hypertension', x = 'Hypertension')
+
+smoking_labels =  c('Formerly Smoked', 'Never Smoked', 'Smokes', 'Unknown')
+
+ggplot(stroke.df, aes(x = factor(smoking_status, levels = c(1,2,3,4), labels = smoking_labels))) + 
+  geom_bar() + 
+  labs(title = 'Distribution of Smoking Status', x = 'Smoking Status')
+
+ggplot(stroke.df, aes(x = bmi)) + 
+  geom_histogram() +
+  labs(title = 'Histogram of BMI', x = 'BMI') + 
+  geom_vline(xintercept = 30, color = 'red')
+```
+A lot of the other variables that represent health problems have similar distribution to stroke data.  This is not as much of a problem when they are explanatory variables.  it looks like half the patients either smoke or were smokers, although it is hard to tell because there is such a large unknown category.
+
+
+Based on the distribution of BMI, it looks like most of the patients were overweight with about half being obese, as represented by the red line.  Overall, while serious health problems are fairly rare, most of the patients appear the be unhealthy.  This makes sense as most people who get strokes tend to have some preexisting health issues.
+# Testing models on raw data
+
+```{r, echo = F}
+control = trainControl(method = 'cv', number = 3)
+```
+
+```{r, warning = F, message = F}
+tree.model <- train(stroke~., data = stroke.df, method = 'rpart', metric = 'Accuracy', trControl = control, tuneLength = 5)
+
+nb.model <- train(stroke~., data = stroke.df, method = 'nb', metric = 'Accuracy', laplace = 1, trControl = control, tuneLength = 5)
+```
+
+```{r, warning = F}
+knn.model = train(stroke~., data = stroke.df, method = 'knn', metric = 'Accuracy', trControl = control, tuneLength = 5)
+svm.model = train(stroke~., data = stroke.df, method = 'svmRadial', metric = 'Accuracy', trControl = control, tuneLength = 5)
+```
+
+```{r, echo = F}
+results = resamples(list(
+  Decision_tree = tree.model,
+  Naive_bayes = nb.model,
+  KNN= knn.model,
+  SVM = svm.model
+))
+
+dotplot(results)
+```
+
+## Model Evaluation
+
+As expected, when working with the raw data, all the models hit 95% accuracy, which is the accuracy you would get by classifying everything as negative.
+
+### Decision Tree
+
+```{r, echo = F}
+cm(tree.model)$table
+```
+
+### Naive Bayes
+
+```{r, echo = F}
+cm(nb.model)$table
+```
+
+### KNN
+
+```{r, echo = F}
+cm(knn.model)$table
+```
+
+### SVM
+
+```{r, echo = F}
+cm(svm.model)$table
+```
+
+
+Of the initial models tried the best performing was technically the SVM, as it was able to detect one true positive.  However, these confusion matrices confirm that the models are learning to classify everything as 'no stroke' and are not actually useful.
+
+
+# Trimming down the data
+
+To attempt to fix this issue, most of the negative cases will be removed to make them comparable with the amount of positive cases.
+
+```{r, echo = F}
+prop = 1
+
+stroke.df.pos = stroke.df[stroke.df$stroke == 1, ]
+stroke.df.neg = stroke.df[stroke.df$stroke == 0, ]
+indexes = sample(1:nrow(stroke.df.neg), nrow(stroke.df.pos) * prop)
+stroke.df.neg = stroke.df.neg[indexes, ]
+stroke.df.balanced = rbind(stroke.df.pos, stroke.df.neg)
+
+print(sum(stroke.df.balanced$stroke == 0) / nrow(stroke.df.balanced))
+ggplot(stroke.df.balanced, aes(x = stroke)) +
+  geom_bar() + 
+  labs(title = 'Distribution of Stroke variable after Manipulation', x = 'Stroke', y = '')
+```
+
+There will be a lot less data to work with, but there are still over 400 data points, so trends should still emerge.
+
+```{r, echo = F}
+stroke.df.clean = stroke.df
+stroke.df.clean$gender = as.data.frame(model.matrix(~gender, data = stroke.df))$gender2
+stroke.df.clean$hypertension = as.integer(stroke.df$hypertension) - 1
+stroke.df.clean$heart_disease = as.integer(stroke.df$heart_disease) - 1
+stroke.df.clean$ever_married = as.integer(stroke.df$ever_married) - 1
+
+work_type_dummies = as.data.frame(model.matrix(~work_type, data = stroke.df))
+stroke.df.clean$wt1 = work_type_dummies$work_type2
+stroke.df.clean$wt2 = work_type_dummies$work_type3
+stroke.df.clean$wt3 = work_type_dummies$work_type4
+stroke.df.clean$wt4 = work_type_dummies$work_type5
+stroke.df.clean$work_type = NULL
+
+smoke_dummies = as.data.frame(model.matrix(~smoking_status, data = stroke.df))
+stroke.df.clean$ss1 = smoke_dummies$smoking_status2
+stroke.df.clean$ss2 = smoke_dummies$smoking_status3
+stroke.df.clean$ss3 = smoke_dummies$smoking_status4
+
+stroke.df.clean$smoking_status = NULL
+
+stroke.df.clean$ever_married = as.integer(stroke.df$ever_married) - 1
+stroke.df.clean$Residence_type = as.integer(stroke.df$Residence_type) - 1
+stroke.df.clean$stroke = as.integer(stroke.df$stroke) - 1
+
+stroke.df.clean.labels = data.frame(stroke.df.clean$stroke)
+stroke.df.clean$stroke = NULL
+
+#write.csv(stroke.df.clean, 'clean.data.x.csv', row.names = F)
+#write.csv(stroke.df.clean.labels, 'clean.data.y.csv', row.names = F)
+
+```
+
+
+```{r, warning = F}
+tree.model.b <- train(stroke~., data = stroke.df.balanced, method = 'rpart', metric = 'Accuracy', trControl = control, tuneLength = 5)
+
+nb.model.b <- train(stroke~., data = stroke.df.balanced, method = 'nb', metric = 'Accuracy', laplace = 1, trControl = control, tuneLength = 5)
+
+knn.model.b = train(stroke~., data = stroke.df.balanced, method = 'knn', metric = 'Accuracy', trControl = control, tuneLength = 5)
+svm.model.b = train(stroke~., data = stroke.df.balanced, method = 'svmRadial', metric = 'Accuracy', trControl = control, tuneLength = 5)
+```
+
+## Model Evaluation
+
+```{r, echo = F}
+resultsb = resamples(list(
+  Decision_tree = tree.model.b,
+  Naive_bayes = nb.model.b,
+  KNN= knn.model.b,
+  SVM = svm.model.b
+))
+
+dotplot(resultsb)
+```
+
+The accuracy of these models is less than the previous models, but if they are actually ably to detect true positives, it will be an improvement.
+
+
+
+### Decision Tree
+
+```{r, echo = F}
+cm(tree.model.b)$table
+```
+
+### Naive Bayes
+
+```{r, echo = F}
+cm(nb.model.b)$table
+```
+
+### KNN
+
+```{r, echo = F}
+cm(knn.model.b)$table
+```
+
+### SVM
+
+```{r, echo = F}
+cm(svm.model.b)$table
+```
+
+
+These models are able to correctly identify positives, although they do have a much higher false positive rate.  This is somewhat acceptable, as there are so few true positives, that even a small false positive rate percentage wise will cause the precision to tank.  Also in cases like this it is better to be over cautious, and give attention to those who are not actually at risk, than ignore those who are at risk.  That being said, the false positive rate is incredibly high, meaning these models are still not very good.
+
+# Neural nets
+
+Neural networks offer a more advanced type of model, that can often provide more accurate results than simpler models.  However, they require a lot more data, so trimming down the data to make it balanced will no longer work.
+
+## SMOTE
+
+To increase the number of data points in the train set, I used synthetic minority oversampling techniques (SMOTE). This method finds data points in the minority (positive stroke cases), and finds the K nearest neighbors of the same class, then generates new data points on the line between them.  This creates a very large, balanced data set, that will help the neural network train more effectively.
+## Archietcture
+
+![Code for building a neural network using TensorFlow](build_nn1.png)
+
+The architecture for the final neural network consisted of 3 layers with 250 neurons each, using the Relu activation function (figure 1).
+## Model Evaluation
+
+![Metrics from the Neural Network](model_eval.png)
+
+The neural network greatly outperformed all previous models.  When ran on the original data set, it correctly identified 206 out of 209 stroke cases, and only had 118 false positives from a data set of almost 5000 data points (figure 2).  While the neural net performed well, it also had an advantage of a larger data set due to the SMOTE methodology.  Unfortunately, I could not get SMOTE to work in R.  Since other types of models are less notorious for needing huge data sets, it shouldn't impact performance too much, and much of the improvements can be attributed to the model
+
+
+
+# Conclusion
+
+Overall, the neural network provided by far the best results of any of the models, providing both an incredibly high accuracy rate, as well as very good detection of true positives.  Other models were very difficult to balance between a very high false negative rate, and a very high false positive rate.  manipulation of the data was very necessary, as without it, all the models (even the neural net) had horrible false negative rates, but only the neural net seemed to not be negatively effected in the opposite direction when the data was balanced.
+
+Thus, using neural networks, it is very possible to predict with a high degree of accuracy, whether a patient is at risk of having a stroke given the variables provided.  Due to the nature of neural networks, it is difficult to predict which variables are the most helpful, but it is definatley possible to get very accurate predictions.
